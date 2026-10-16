@@ -1,0 +1,224 @@
+---
+import MainLayout from "../layouts/MainLayout.astro";
+---
+
+<MainLayout title="Panel docente">
+  <div class="card">
+    <h1>Crear votación</h1>
+    <p class="muted">Configura una nueva votación para tu clase.</p>
+
+    <form id="pollForm">
+      <div class="field">
+        <label for="adminKey">Clave del docente</label>
+        <input
+          id="adminKey"
+          type="password"
+          autocomplete="off"
+          placeholder="Clave de administración"
+          required
+        />
+      </div>
+      <div class="field">
+        <label for="question">Pregunta o título</label>
+        <input
+          id="question"
+          minlength="5"
+          maxlength="200"
+          type="text"
+          placeholder="¿Quién será el delegado?"
+          required
+        />
+      </div>
+
+      <div class="field">
+        <label for="description">Descripción</label>
+        <textarea id="description" maxlength="1000" rows="3" placeholder="Información adicional"
+        ></textarea>
+      </div>
+
+      <h3>Candidatos u opciones</h3>
+
+      <div id="candidates" class="options">
+        <input
+          type="text"
+          class="candidate"
+          maxlength="100"
+          placeholder="Candidato 1"
+          required
+        />
+        <input
+          type="text"
+          class="candidate"
+          maxlength="100"
+          placeholder="Candidato 2"
+          required
+        />
+      </div>
+
+      <div class="actions">
+        <button type="button" id="addCandidate" class="btn secondary">
+          + Agregar candidato
+        </button>
+
+        <button type="submit" class="btn primary"> Crear votación </button>
+      </div>
+    </form>
+
+    <p id="result" class="message" role="status"></p>
+    <hr />
+    <h2>Administrar votación</h2>
+    <p>Usa la clave del formulario superior. Genera una credencial por alumno antes de abrir. Cópialas antes de salir: solo se muestran al generarlas.</p>
+    <form id="manageForm">
+      <div class="field"><label for="manageCode">Código de votación</label><input id="manageCode" required pattern="[A-Fa-f0-9]{12}" maxlength="12" /></div>
+      <div class="field"><label for="participantCount">Participantes (1 a 100 por lote)</label><input id="participantCount" type="number" min="1" max="100" value="1" required /></div>
+      <div class="actions">
+        <button class="btn secondary" name="action" value="participants">Generar credenciales</button>
+        <button class="btn primary" name="action" value="open">Abrir votación</button>
+        <button class="btn secondary" name="action" value="closed">Cerrar votación</button>
+      </div>
+    </form>
+    <p id="manageResult" role="status"></p>
+    <div class="field"><label for="credentials">Credenciales (una por alumno)</label><textarea id="credentials" readonly rows="6"></textarea></div>
+  </div>
+</MainLayout>
+
+<script>
+  
+const form = document.querySelector<HTMLFormElement>(
+  "#pollForm"
+);
+
+const candidates = document.querySelector<HTMLDivElement>(
+  "#candidates"
+);
+
+const addButton = document.querySelector<HTMLButtonElement>(
+  "#addCandidate"
+);
+
+const result = document.querySelector<HTMLParagraphElement>(
+  "#result"
+);
+let saving = false;
+
+addButton?.addEventListener("click", () => {
+  if (!candidates || candidates.children.length >= 20) {
+    return;
+  }
+
+  const input = document.createElement("input");
+
+  input.type = "text";
+  input.className = "candidate";
+  input.placeholder = `Candidato ${candidates.children.length + 1}`;
+  input.required = true;
+  input.maxLength = 100;
+
+  candidates.appendChild(input);
+});
+
+form?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (saving) return;
+
+  const adminKey = document.querySelector<HTMLInputElement>(
+    "#adminKey"
+  )?.value ?? "";
+
+  const question = document.querySelector<HTMLInputElement>(
+    "#question"
+  )?.value.trim() ?? "";
+
+  const description = document.querySelector<HTMLTextAreaElement>(
+    "#description"
+  )?.value.trim() ?? "";
+
+  const options = Array.from(
+    document.querySelectorAll<HTMLInputElement>(
+      ".candidate"
+    )
+  ).map((input) => input.value.trim());
+
+  if (!adminKey || !question || options.some((o) => !o)) {
+    return;
+  }
+
+  if (result) result.textContent = "Guardando votación...";
+  saving = true;
+  const submit = form.querySelector<HTMLButtonElement>('button[type="submit"]');
+  if (submit) submit.disabled = true;
+
+  try {
+    const response = await fetch("/api/polls", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-admin-key": adminKey
+      },
+      body: JSON.stringify({
+        question,
+        description,
+        options
+      })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error ?? "Error al crear");
+    }
+
+    if (result) result.textContent = `Votación creada. Código: ${data.code}. Usa el panel inferior para autorizar participantes y abrirla.`;
+    const codeInput = document.querySelector<HTMLInputElement>("#manageCode");
+    if (codeInput) codeInput.value = data.code;
+  } catch (error) {
+    if (result) {
+      result.textContent =
+        error instanceof Error
+          ? error.message
+          : "Error desconocido";
+    }
+  } finally {
+    saving = false;
+    if (submit) submit.disabled = false;
+  }
+});
+
+</script>
+
+<script>
+  const manageForm = document.querySelector<HTMLFormElement>("#manageForm");
+  let managing = false;
+  manageForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (managing) return;
+    const action = (event.submitter as HTMLButtonElement | null)?.value;
+    if (!action) return;
+    const key = document.querySelector<HTMLInputElement>("#adminKey")?.value;
+    const code = document.querySelector<HTMLInputElement>("#manageCode")?.value.toUpperCase();
+    const count = Number(document.querySelector<HTMLInputElement>("#participantCount")?.value);
+    const message = document.querySelector<HTMLElement>("#manageResult");
+    if (!key) { if (message) message.textContent = "Introduce la clave del docente."; return; }
+    managing = true;
+    const buttons = manageForm.querySelectorAll<HTMLButtonElement>("button");
+    buttons.forEach((button) => button.disabled = true);
+    try {
+      const response = await fetch(`/api/polls/${code}/manage`, {
+        method: "POST", headers: { "Content-Type": "application/json", "x-admin-key": key },
+        body: JSON.stringify({ action, count })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "No se pudo administrar la votación");
+      if (data.credentials) {
+        const output = document.querySelector<HTMLTextAreaElement>("#credentials");
+        if (output) output.value += `${output.value ? "\n" : ""}${code}\n${data.credentials.join("\n")}`;
+      }
+      if (message) message.textContent = data.message ?? "Credenciales generadas. Cópialas antes de salir.";
+    } catch (error) {
+      if (message) message.textContent = error instanceof Error ? error.message : "Error desconocido";
+    } finally {
+      managing = false;
+      buttons.forEach((button) => button.disabled = false);
+    }
+  });
+</script>

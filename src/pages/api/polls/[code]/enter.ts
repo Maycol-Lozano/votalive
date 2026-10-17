@@ -12,5 +12,7 @@ export const POST: APIRoute=async({request,params})=>{
  if(!await verify(`qr:${code}:${slot}`,signature))return Response.json({error:"Acceso temporal no válido"},{status:403});
  const poll=await env.DB.prepare("SELECT status FROM polls WHERE code=?").bind(code).first<{status:string}>();if(!poll||poll.status!=="open")return Response.json({error:"La votación no está abierta"},{status:403});
  const expires=Math.floor(Date.now()/1000)+600;const token=`${expires}.${await sign(`presence:${code}:${expires}`)}`;
- return Response.json({ok:true},{headers:{"Set-Cookie":`votalive_${code}=${token}; Path=/api/polls/${code}/; HttpOnly; Secure; SameSite=Strict; Max-Age=600`,"Cache-Control":"no-store"}});
+ // En HTTPS la cookie siempre es Secure. En HTTP se admite solo para demos locales por LAN.
+ const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
+ return Response.json({ok:true},{headers:{"Set-Cookie":`votalive_${code}=${token}; Path=/api/polls/${code}/; HttpOnly${secure}; SameSite=Strict; Max-Age=600`,"Cache-Control":"no-store"}});
 };

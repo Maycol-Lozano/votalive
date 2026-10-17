@@ -11,7 +11,7 @@ Votaciones presenciales con Astro, Cloudflare Workers y D1.
 5. Regenera tipos con `npm run cf-typegen` tras cambiar enlaces o variables. No edites manualmente `worker-configuration.d.ts`.
 6. Inicia con `npm run dev -- --background`. Administra el servidor con `npm run astro -- dev status`, `npm run astro -- dev logs` y `npm run astro -- dev stop`.
 
-La configuración actual tiene `remote: true` en D1: el servidor de desarrollo usa la base remota. Para usar datos locales, elimina esa propiedad o cámbiala a `false` antes de iniciar. Las migraciones con `--local` no afectan a la base remota.
+La configuración de D1 usa `remote: false` para que el servidor de desarrollo utilice la base local. Aplica las migraciones locales con `npx wrangler d1 migrations apply votalive-db --local`. Las migraciones con `--local` no afectan a la base remota.
 
 ## Uso
 

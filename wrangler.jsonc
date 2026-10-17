@@ -18,7 +18,7 @@
 			"binding": "DB",
 			"database_name": "votalive-db",
 			"database_id": "000b325f-9881-46e3-aae6-4001ccf5a4ab",
-			"remote": true
+			"remote": false
 		}
 	]
 }

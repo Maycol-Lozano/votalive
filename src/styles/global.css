@@ -123,6 +123,33 @@ textarea:focus {
   font-size: 14px;
 }
 
+select { width:100%; padding:12px; border:1px solid #d0d5dd; border-radius:9px; background:white; color:inherit; }
+.filters { display:grid; grid-template-columns:minmax(180px,1fr) minmax(150px,220px) auto; gap:12px; align-items:end; }
+.filters .field { margin:8px 0; }
+.poll-list { display:grid; gap:12px; }
+.poll-row { display:flex; justify-content:space-between; align-items:center; gap:20px; border:1px solid #e5e7eb; border-radius:12px; padding:16px; }
+.poll-row h3 { margin:0; }
+.poll-row p { margin:8px 0 0; }
+.compact { margin:0; }
+.error { color:#b42318; }
+.connection-state { color:#087f74; font-size:14px; }
+.connection-state[data-online="false"] { color:#b42318; }
+.field-error { min-height:1em; color:#b42318; font-size:13px; }
+.theme-toggle { border:1px solid #d0d5dd; border-radius:8px; padding:7px 10px; background:transparent; color:inherit; }
+.results-chart { display:grid; gap:16px; margin-top:20px; }
+.qr-panel { margin-top:24px; padding:20px; border:1px solid #d0d5dd; border-radius:12px; text-align:center; }
+.qr-panel img { display:block; width:min(240px,100%); height:auto; margin:16px auto; image-rendering:pixelated; }
+.result-label { display:flex; justify-content:space-between; gap:12px; margin-bottom:6px; }
+.bar-track { height:14px; border-radius:20px; background:#e5e7eb; overflow:hidden; }
+.bar-fill { height:100%; border-radius:inherit; background:#087f74; transition:width .3s ease; }
+html[data-theme="dark"] { color-scheme:dark; color:#e6edf5; background:#111827; }
+html[data-theme="dark"] body, html[data-theme="dark"] header { background:#111827; color:#e6edf5; }
+html[data-theme="dark"] .card, html[data-theme="dark"] .poll-row { background:#1f2937; border-color:#374151; }
+html[data-theme="dark"] input, html[data-theme="dark"] textarea, html[data-theme="dark"] select { background:#111827; color:#e6edf5; border-color:#4b5563; }
+html[data-theme="dark"] .muted { color:#aab6c5; }
+html[data-theme="dark"] .bar-track { background:#374151; }
+html[data-theme="dark"] header { border-color:#374151; }
+
 @media (max-width: 600px) {
   .container {
     margin: 24px auto;
@@ -135,4 +162,6 @@ textarea:focus {
   .actions .btn {
     flex: 1;
   }
+  .filters { grid-template-columns:1fr; }
+  .poll-row { align-items:stretch; flex-direction:column; }
 }

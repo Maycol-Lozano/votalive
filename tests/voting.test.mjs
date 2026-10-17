@@ -36,16 +36,24 @@ test('API: validación, participantes, estados y voto único', async () => {
       } catch (error) { db.exec('ROLLBACK'); throw error; }
     }
   };
-  globalThis.testEnv = { DB: wrapper, ADMIN_KEY: 'test-key' };
+  globalThis.testEnv = { DB: wrapper, ADMIN_KEY: 'test-key', QR_SECRET: 'test-qr-secret' };
   const create = await endpoint('index.ts');
   const manage = await endpoint('[code]/manage.ts');
   const votes = await endpoint('[code]/votes.ts');
-  const call = (api, body, code = '', key = 'test-key') => api.POST({
-    params: { code }, request: new Request('https://example.test/api', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-key': key },
-      body: JSON.stringify(body)
-    })
-  });
+  const enter = await endpoint('[code]/enter.ts');
+  const call = async (api, body, code = '', key = 'test-key') => {
+    const headers = { 'Content-Type': 'application/json', 'x-admin-key': key };
+    if (api === votes) {
+      const expires = Math.floor(Date.now() / 1000) + 600;
+      const hmacKey = await crypto.subtle.importKey('raw', new TextEncoder().encode('test-qr-secret'), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+      const signature = Buffer.from(await crypto.subtle.sign('HMAC', hmacKey, new TextEncoder().encode(`presence:${code}:${expires}`))).toString('base64url');
+      headers.cookie = `votalive_${code}=${expires}.${signature}`;
+    }
+    return api.POST({ params: { code }, request: new Request('https://example.test/api', { method: 'POST', headers, body: JSON.stringify(body) }) });
+  };
+  const callWithoutPresence = (body, code) => votes.POST({ params: { code }, request: new Request('https://example.test/api', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  }) });
   assert.equal((await call(create, null)).status, 400);
   assert.equal((await call(create, [])).status, 400);
   assert.equal((await call(create, {}, '', 'wrong')).status, 401);
@@ -59,11 +67,14 @@ test('API: validación, participantes, estados y voto único', async () => {
   const participants = await call(manage, { action: 'participants', count: 2 }, code);
   assert.equal(participants.status, 200);
   const { credentials } = await participants.json();
+  const expired = await call(enter, { slot: Math.floor(Date.now() / 30000) - 2, sig: 'stale' }, code);
+  assert.equal(expired.status, 403, 'rechaza QR vencido');
   const optionId = db.prepare('SELECT id FROM options LIMIT 1').get().id;
   const vote = { optionId, credential: credentials[0] };
   assert.equal((await call(votes, vote, code)).status, 409, 'borrador no admite votos');
   assert.equal((await call(manage, { action: 'open' }, code)).status, 200);
   assert.equal((await call(manage, { action: 'participants', count: 1 }, code)).status, 409);
+  assert.equal((await callWithoutPresence(vote, code)).status, 403, 'requiere cookie de presencia');
   assert.equal((await call(votes, { ...vote, credential: '0'.repeat(32) }, code)).status, 409);
   assert.equal((await call(votes, { ...vote, optionId: 'otra-opcion' }, code)).status, 409);
   assert.equal((await call(votes, vote, code)).status, 201);

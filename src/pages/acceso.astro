@@ -1,0 +1,11 @@
+---
+import MainLayout from "../layouts/MainLayout.astro";
+---
+<MainLayout title="Acceso temporal">
+ <section class="card"><h1>Validando acceso</h1><p id="entryMessage" class="message" role="status" aria-live="polite">Comprobando vigencia del código…</p></section>
+</MainLayout>
+<script>
+ const params=new URLSearchParams(location.search);const code=params.get("code")?.toUpperCase()??"";const slot=Number(params.get("slot"));const sig=params.get("sig")??"";const message=document.querySelector<HTMLElement>("#entryMessage");
+ async function enter(){try{if(!/^[A-F0-9]{12}$/.test(code))throw new Error("Enlace no válido.");const response=await fetch(`/api/polls/${code}/enter`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({slot,sig})});const data=await response.json();if(!response.ok)throw new Error(data.error??"El acceso temporal no es válido.");location.replace(`/votar?code=${code}`);}catch(error){if(message)message.textContent=error instanceof Error?error.message:"No se pudo validar el acceso.";}}
+ enter();
+</script>

@@ -28,6 +28,7 @@ import MainLayout from "../layouts/MainLayout.astro";
           placeholder="¿Quién será el delegado?"
           required
         />
+        <span id="questionError" class="field-error" aria-live="polite"></span>
       </div>
 
       <div class="field">
@@ -54,6 +55,7 @@ import MainLayout from "../layouts/MainLayout.astro";
           required
         />
       </div>
+      <span id="optionsError" class="field-error" aria-live="polite"></span>
 
       <div class="actions">
         <button type="button" id="addCandidate" class="btn secondary">
@@ -64,6 +66,7 @@ import MainLayout from "../layouts/MainLayout.astro";
       </div>
     </form>
 
+    <p id="creationErrors" class="message error" role="alert" hidden></p>
     <p id="result" class="message" role="status"></p>
     <hr />
     <h2>Administrar votación</h2>
@@ -79,6 +82,22 @@ import MainLayout from "../layouts/MainLayout.astro";
     </form>
     <p id="manageResult" role="status"></p>
     <div class="field"><label for="credentials">Credenciales (una por alumno)</label><textarea id="credentials" readonly rows="6"></textarea></div>
+    <hr />
+    <h2>Votaciones registradas</h2>
+    <p class="muted">Busca por título o código y filtra por estado.</p>
+    <p id="connectionState" class="connection-state" role="status" aria-live="polite"></p>
+    <div class="filters">
+      <div class="field"><label for="pollSearch">Buscar</label><input id="pollSearch" type="search" placeholder="Título o código" /></div>
+      <div class="field"><label for="statusFilter">Estado</label><select id="statusFilter"><option value="all">Todos</option><option value="draft">Borrador</option><option value="open">Abierta</option><option value="closed">Cerrada</option></select></div>
+      <button id="loadPolls" type="button" class="btn secondary">Actualizar listado</button>
+    </div>
+    <p id="listMessage" class="message" role="status" aria-live="polite">Introduce tu clave para cargar las votaciones.</p>
+    <div id="pollList" class="poll-list"></div>
+    <section id="qrPanel" class="qr-panel" hidden aria-live="polite">
+      <h3>Acceso temporal a la votación</h3><p id="qrStatus" class="muted"></p>
+      <img id="qrImage" alt="Código QR temporal para entrar a la votación" hidden />
+      <p id="qrCountdown" class="message" role="timer"></p>
+    </section>
   </div>
 </MainLayout>
 
@@ -139,9 +158,24 @@ form?.addEventListener("submit", async (event) => {
     )
   ).map((input) => input.value.trim());
 
-  if (!adminKey || !question || options.some((o) => !o)) {
+  const questionInput = document.querySelector<HTMLInputElement>("#question");
+  const optionInputs = Array.from(document.querySelectorAll<HTMLInputElement>(".candidate"));
+  const errors = document.querySelector<HTMLElement>("#creationErrors");
+  const normalizedOptions = options.map((option) => option.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLocaleLowerCase("es"));
+  if (!adminKey || question.length < 5 || options.length < 2 || options.length > 20 || options.some((o) => o.length < 1 || o.length > 100) || new Set(normalizedOptions).size !== options.length) {
+    const questionError = document.querySelector<HTMLElement>("#questionError");
+    const optionsError = document.querySelector<HTMLElement>("#optionsError");
+    if (questionError) questionError.textContent = question.length < 5 || question.length > 200 ? "La pregunta debe tener entre 5 y 200 caracteres." : "";
+    if (optionsError) optionsError.textContent = options.length < 2 || options.length > 20 ? "Registra entre 2 y 20 opciones." : new Set(normalizedOptions).size !== options.length ? "No repitas opciones, aunque cambien mayúsculas o tildes." : options.some((o) => !o || o.length > 100) ? "Completa cada opción con hasta 100 caracteres." : "";
+    if (!adminKey && result) result.textContent = "Introduce la clave del docente.";
+    if (errors) {
+      const duplicate = new Set(normalizedOptions).size !== options.length;
+      errors.textContent = !question || question.length < 5 ? "La pregunta debe tener entre 5 y 200 caracteres." : options.length < 2 || options.length > 20 ? "Registra entre 2 y 20 opciones." : duplicate ? "Las opciones deben ser únicas." : "Completa cada opción (máximo 100 caracteres).";
+      errors.hidden = false;
+    }
     return;
   }
+  if (errors) { errors.textContent = ""; errors.hidden = true; }
 
   if (result) result.textContent = "Guardando votación...";
   saving = true;
@@ -187,6 +221,66 @@ form?.addEventListener("submit", async (event) => {
 </script>
 
 <script>
+  import QRCode from "qrcode";
+  const list = document.querySelector<HTMLElement>("#pollList");
+  const listMessage = document.querySelector<HTMLElement>("#listMessage");
+  const search = document.querySelector<HTMLInputElement>("#pollSearch");
+  const statusFilter = document.querySelector<HTMLSelectElement>("#statusFilter");
+  const loadButton = document.querySelector<HTMLButtonElement>("#loadPolls");
+  const connectionState = document.querySelector<HTMLElement>("#connectionState");
+  function updateConnection(){ if(connectionState){connectionState.textContent=navigator.onLine?"● Con conexión":"● Sin conexión; se reintentará al recuperar la red";connectionState.dataset.online=String(navigator.onLine);} }
+  window.addEventListener("online",()=>{updateConnection();window.clearTimeout(retryTimer);retryTimer=window.setTimeout(loadPolls,500);});
+  window.addEventListener("offline",updateConnection); updateConnection();
+  const apiKey = () => document.querySelector<HTMLInputElement>("#adminKey")?.value ?? "";
+  let polls: Array<{code:string;question:string;status:string;created_at:string;total_votes:number;authorized:number}> = [];
+  let listBusy = false;
+  let retryTimer: number | undefined;
+  let qrTimer: number | undefined;
+  const escapeHtml = (value: string) => { const span = document.createElement("span"); span.textContent = value; return span.innerHTML; };
+  function renderPolls() {
+    if (!list || !listMessage) return;
+    const query = search?.value.trim().toLocaleLowerCase("es") ?? "";
+    const state = statusFilter?.value ?? "all";
+    const rows = polls.filter((poll) => (state === "all" || poll.status === state) && `${poll.question} ${poll.code}`.toLocaleLowerCase("es").includes(query));
+    list.replaceChildren();
+    if (!rows.length) { listMessage.textContent = polls.length ? "No hay votaciones que coincidan con esos filtros." : "No hay votaciones registradas."; return; }
+    listMessage.textContent = `${rows.length} votación${rows.length === 1 ? "" : "es"}.`;
+    for (const poll of rows) {
+      const card = document.createElement("article"); card.className = "poll-row";
+      const participation = poll.authorized ? Math.round(poll.total_votes * 100 / poll.authorized) : 0;
+      const pending = Math.max(0, poll.authorized - poll.total_votes);
+      card.innerHTML = `<div><h3>${escapeHtml(poll.question)}</h3><p class="muted">Código ${escapeHtml(poll.code)} · ${escapeHtml(poll.status)} · ${new Date(poll.created_at + (poll.created_at.endsWith("Z") ? "" : "Z")).toLocaleString("es-PE")}</p><p>${poll.total_votes} votos · ${poll.authorized} autorizados · ${pending} pendientes · ${participation}% participación</p></div><div class="actions compact"><button class="btn secondary results-button" type="button">Ver resultados</button>${poll.status === "open" ? '<button class="btn primary close-button" type="button">Cerrar</button><button class="btn secondary qr-button" type="button">Acceso temporal</button>' : ""}${poll.status === "closed" ? '<button class="btn secondary export-button" type="button">Descargar acta CSV</button>' : ""}</div>`;
+      card.querySelector<HTMLButtonElement>(".results-button")?.addEventListener("click", () => { const target = new URL("/resultados", location.origin); target.searchParams.set("code", poll.code); location.href = target.toString(); });
+      card.querySelector<HTMLButtonElement>(".close-button")?.addEventListener("click", async (event) => {
+        const button = event.currentTarget as HTMLButtonElement; if (button.disabled || !confirm(`¿Cerrar “${poll.question}”? No se admitirán más votos.`)) return;
+        button.disabled = true; button.textContent = "Cerrando…";
+        try { const response = await fetch(`/api/polls/${poll.code}/manage`, {method:"POST",headers:{"Content-Type":"application/json","x-admin-key":apiKey()},body:JSON.stringify({action:"closed"})}); const data=await response.json(); if(!response.ok) throw new Error(data.error ?? "No se pudo cerrar la votación."); listMessage!.textContent="Votación cerrada correctamente."; await loadPolls(); }
+        catch(error) { listMessage!.textContent = error instanceof Error ? error.message : "Error al cerrar."; button.disabled=false; button.textContent="Cerrar"; }
+      });
+      card.querySelector<HTMLButtonElement>(".export-button")?.addEventListener("click", async (event) => { const button=event.currentTarget as HTMLButtonElement; button.disabled=true; try { const response=await fetch(`/api/polls/${poll.code}/export`,{headers:{"x-admin-key":apiKey()}}); if(!response.ok) throw new Error("No se pudo descargar el acta."); const blob=await response.blob(); const url=URL.createObjectURL(blob); const anchor=document.createElement("a"); anchor.href=url; anchor.download=`votalive-${poll.code}.csv`; anchor.click(); URL.revokeObjectURL(url); } catch(error) { if(listMessage) listMessage.textContent=error instanceof Error?error.message:"Error al exportar."; } finally { button.disabled=false; } });
+      card.querySelector<HTMLButtonElement>(".qr-button")?.addEventListener("click", () => showQr(poll.code));
+      list.append(card);
+    }
+  }
+  async function loadPolls() {
+    if(listBusy) return; if(!apiKey()) { if(listMessage) listMessage.textContent="Introduce la clave del docente."; return; }
+    listBusy=true; if(loadButton) loadButton.disabled=true; if(listMessage) listMessage.textContent="Cargando votaciones…";
+    try { const response=await fetch("/api/admin/polls",{headers:{"x-admin-key":apiKey()}}); if(!response.ok) {const data=await response.json(); throw new Error(data.error ?? "No se pudo cargar el listado.");} const data=await response.json(); polls=data.polls; renderPolls(); window.clearTimeout(retryTimer); }
+    catch(error) { if(listMessage) listMessage.textContent=`${error instanceof Error ? error.message : "Error de conexión."} Reintentaremos en 5 segundos.`; retryTimer=window.setTimeout(loadPolls,5000); }
+    finally { listBusy=false; if(loadButton) loadButton.disabled=false; }
+  }
+  async function showQr(code: string) {
+    const panel=document.querySelector<HTMLElement>("#qrPanel"); const status=document.querySelector<HTMLElement>("#qrStatus"); const image=document.querySelector<HTMLImageElement>("#qrImage"); const countdown=document.querySelector<HTMLElement>("#qrCountdown");
+    if(!panel||!status||!image||!countdown)return; window.clearInterval(qrTimer); panel.hidden=false; image.hidden=true; image.removeAttribute("src"); status.textContent="Generando QR temporal…";
+    try { const response=await fetch(`/api/polls/${code}/qr`,{headers:{"x-admin-key":apiKey()}}); const data=await response.json(); if(!response.ok)throw new Error(data.error ?? "No se pudo generar el acceso.");
+      image.src=await QRCode.toDataURL(data.url,{width:240,margin:2,errorCorrectionLevel:"M"}); image.hidden=false; status.textContent="Escanea este QR desde el celular. Se renueva cada 30 segundos.";
+      const expiry=Number(data.expiresAt); const tick=()=>{const left=Math.max(0,Math.ceil((expiry-Date.now())/1000)); countdown.textContent=left?`QR vigente por ${left} s`:"QR vencido. La imagen anterior se ocultó; genera un nuevo QR."; if(!left){image.hidden=true;image.removeAttribute("src");window.clearInterval(qrTimer);}}; tick(); qrTimer=window.setInterval(tick,1000);
+    } catch(error) { status.textContent=error instanceof Error?error.message:"No se pudo generar el acceso."; }
+  }
+  search?.addEventListener("input",renderPolls); statusFilter?.addEventListener("change",renderPolls); loadButton?.addEventListener("click",loadPolls);
+</script>
+
+<script>
   const manageForm = document.querySelector<HTMLFormElement>("#manageForm");
   let managing = false;
   manageForm?.addEventListener("submit", async (event) => {
@@ -194,6 +288,7 @@ form?.addEventListener("submit", async (event) => {
     if (managing) return;
     const action = (event.submitter as HTMLButtonElement | null)?.value;
     if (!action) return;
+    if (action === "closed" && !confirm("¿Cerrar la votación? Ya no se admitirán más votos.")) return;
     const key = document.querySelector<HTMLInputElement>("#adminKey")?.value;
     const code = document.querySelector<HTMLInputElement>("#manageCode")?.value.toUpperCase();
     const count = Number(document.querySelector<HTMLInputElement>("#participantCount")?.value);

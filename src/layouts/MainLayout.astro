@@ -27,6 +27,7 @@ const { title } = Astro.props;
         <div class="links">
           <a href="/docente">Docente</a>
           <a href="/alumno">Alumno</a>
+          <button type="button" id="themeToggle" class="theme-toggle" aria-label="Activar modo oscuro" aria-pressed="false">◐ <span>Modo oscuro</span></button>
         </div>
       </nav>
     </header>
@@ -64,3 +65,11 @@ const { title } = Astro.props;
     font-size: 14px;
   }
 </style>
+
+<script>
+  const toggle=document.querySelector<HTMLButtonElement>("#themeToggle");
+  const saved=localStorage.getItem("votalive-theme");
+  if(saved==="dark") document.documentElement.dataset.theme="dark";
+  function syncTheme(){const dark=document.documentElement.dataset.theme==="dark";if(toggle){toggle.setAttribute("aria-pressed",String(dark));toggle.setAttribute("aria-label",dark?"Activar modo claro":"Activar modo oscuro");const label=toggle.querySelector("span");if(label)label.textContent=dark?"Modo claro":"Modo oscuro";}}
+  syncTheme(); toggle?.addEventListener("click",()=>{const dark=document.documentElement.dataset.theme!=="dark";if(dark)document.documentElement.dataset.theme="dark";else delete document.documentElement.dataset.theme;localStorage.setItem("votalive-theme",dark?"dark":"light");syncTheme();});
+</script>

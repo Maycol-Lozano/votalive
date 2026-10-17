@@ -2,6 +2,19 @@ import type { APIRoute } from "astro";
 import { env } from "cloudflare:workers";
 import { hashCredential } from "../../../../lib/credentials";
 
+const encode = (bytes: ArrayBuffer) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+async function validPresence(request: Request, code: string) {
+  if (!env.QR_SECRET) return false;
+  const cookie = request.headers.get("cookie")?.split(";").map((part) => part.trim()).find((part) => part.startsWith(`votalive_${code}=`));
+  const token = cookie?.slice(`votalive_${code}=`.length) ?? "";
+  const [expiresText, signature] = token.split("."); const expires = Number(expiresText);
+  if (!Number.isInteger(expires) || expires <= Math.floor(Date.now()/1000) || !signature) return false;
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(env.QR_SECRET), {name:"HMAC",hash:"SHA-256"}, false, ["verify"]);
+  const raw = signature.replaceAll("-","+").replaceAll("_","/"); const padded=raw+"=".repeat((4-raw.length%4)%4);
+  let bytes: Uint8Array; try { bytes=Uint8Array.from(atob(padded),(c)=>c.charCodeAt(0)); } catch { return false; }
+  return crypto.subtle.verify("HMAC",key,bytes,new TextEncoder().encode(`presence:${code}:${expires}`));
+}
+
 export const POST: APIRoute = async ({ request, params }) => {
   const code = params.code?.toUpperCase() ?? "";
   let body;
@@ -13,6 +26,7 @@ export const POST: APIRoute = async ({ request, params }) => {
       typeof body.credential !== "string" || !/^[a-f0-9]{32}$/.test(body.credential)) {
     return Response.json({ error: "Datos del voto inválidos" }, { status: 400 });
   }
+  if (!await validPresence(request, code)) return Response.json({ error: "Escanea el QR vigente en el aula antes de votar." }, { status: 403 });
   try {
     const poll = await env.DB.prepare("SELECT id FROM polls WHERE code = ?").bind(code).first<{id: string}>();
     if (!poll) return Response.json({ error: "Votación no encontrada" }, { status: 404 });

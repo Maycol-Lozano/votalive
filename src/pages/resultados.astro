@@ -1,0 +1,29 @@
+---
+import MainLayout from "../layouts/MainLayout.astro";
+---
+<MainLayout title="Resultados">
+  <section class="card">
+    <h1>Resultados de votación</h1>
+    <p id="resultsStatus" class="message" role="status" aria-live="polite">Introduce la clave docente para consultar los resultados.</p>
+    <div class="field"><label for="resultsKey">Clave del docente</label><input id="resultsKey" type="password" autocomplete="off" /></div>
+    <div id="resultsSummary" hidden></div>
+    <div id="resultsChart" class="results-chart" aria-live="polite"></div>
+  </section>
+</MainLayout>
+<script>
+  const params=new URLSearchParams(location.search); const code=params.get("code")?.toUpperCase() ?? "";
+  const key=document.querySelector<HTMLInputElement>("#resultsKey"); const status=document.querySelector<HTMLElement>("#resultsStatus"); const chart=document.querySelector<HTMLElement>("#resultsChart"); const summary=document.querySelector<HTMLElement>("#resultsSummary");
+  let busy=false; let timer:number|undefined; let stopped=false;
+  async function refresh() { if(busy||stopped||!key?.value||!code)return; busy=true;
+    try { const response=await fetch(`/api/polls/${code}/results`,{headers:{"x-admin-key":key.value}}); const data=await response.json(); if(!response.ok)throw new Error(data.error??"No se pudieron cargar resultados.");
+      if(status) status.textContent=data.status==="closed"?"Votación cerrada. Resultados definitivos.":"Votación abierta. Actualización automática cada 2 segundos.";
+      if(summary){summary.hidden=false;const leaders=data.options.filter((o:{votes:number})=>o.votes===Math.max(0,...data.options.map((x:{votes:number})=>x.votes)));summary.innerHTML=`<p><strong>${data.total}</strong> votos · <strong>${data.authorized}</strong> autorizados · <strong>${data.pending}</strong> pendientes · <strong>${data.participation.toFixed(1)}%</strong> participación</p><p>${data.winner?`Ganador: ${escape(data.winner)}`:data.tied?`Empate: ${leaders.map((o:{name:string})=>escape(o.name)).join(", ")}`:"Sin votos todavía"}</p>`;}
+      if(chart){chart.replaceChildren(); for(const option of data.options){const row=document.createElement("div");row.className="result-item";row.innerHTML=`<div class="result-label"><span>${escape(option.name)}</span><strong>${option.votes} · ${option.percentage.toFixed(1)}%</strong></div><div class="bar-track"><div class="bar-fill" style="width:${Math.max(0,Math.min(100,option.percentage))}%"></div></div>`;chart.append(row);}}
+      if(data.status==="closed"){stopped=true;window.clearTimeout(timer);timer=undefined;}
+    } catch(error){if(status)status.textContent=`${error instanceof Error?error.message:"Error de conexión."} Se reintentará en 5 segundos.`; timer=window.setTimeout(()=>{timer=undefined;refresh();},5000);}
+    finally{busy=false; if(!stopped&&!timer)timer=window.setTimeout(()=>{timer=undefined;refresh();},2000);}
+  }
+  function escape(text:string){const span=document.createElement("span");span.textContent=text;return span.innerHTML;}
+  key?.addEventListener("input",()=>{stopped=false;window.clearTimeout(timer);timer=undefined;refresh();});
+  if(!/^[A-F0-9]{12}$/.test(code)&&status)status.textContent="Código de votación no válido.";
+</script>
